@@ -2,9 +2,8 @@ name: Download CS Game Files
 
 on:
   schedule:
-    - cron: "30 0 * * *" # UTC 00:00  -> 北京时间 08:30
-    - cron: "0 8 * * *" # UTC 00:00  -> 北京时间 16:00
-
+    - cron: "30 0 * * *" # UTC 00:30 -> 北京 08:30
+    - cron: "0 8 * * *"  # UTC 08:00 -> 北京 16:00
   workflow_dispatch:
     inputs:
       environment:
@@ -12,38 +11,83 @@ on:
         required: false
         default: "force"
         type: choice
-        options:
-          - force
+        options: [force]
 
 jobs:
   download:
     runs-on: ubuntu-latest
 
     permissions:
-      # Give the default GITHUB_TOKEN write permission to commit and push the changed files back to the repository.
       contents: write
 
     steps:
-      - uses: actions/checkout@master
+      - uses: actions/checkout@v4
+
+      # ✨ 释放 GitHub Runner 大量空间（15~20GB）
+      - name: Free disk space
+        run: |
+          echo "Before cleanup:"
+          df -h
+
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/hostedtoolcache
+          sudo rm -rf /opt/google
+          sudo rm -rf $AGENT_TOOLSDIRECTORY
+
+          echo "After cleanup:"
+          df -h
+
+      # ✨ 使用 /mnt 作为大容量存储（70GB+）
+      - name: Prepare storage dir
+        run: |
+          mkdir -p /mnt/csfiles
+          echo "Using /mnt/csfiles for downloads"
+          df -h /mnt
+
       - uses: actions/setup-node@v3
+
+      # ✨ 进入 /mnt/csfiles 执行你的下载逻辑
       - name: Download new game files
-        run: npm install && node index.js "${{ secrets.USERNAME }}" "${{ secrets.PASSWORD }}" "${{ secrets.SHARED_SECRET }} ${{ github.event.inputs.environment }}"
-      - name: Run Decompiler for pak01_dir.vpk with ValveResourceFormat 11.1
+        working-directory: /mnt/csfiles
+        run: |
+          cp -r $GITHUB_WORKSPACE/* /mnt/csfiles/
+          npm install
+          node index.js "${{ secrets.USERNAME }}" "${{ secrets.PASSWORD }}" "${{ secrets.SHARED_SECRET }}" "${{ github.event.inputs.environment }}"
+
+      # ✨ 反编译 pak01_dir.vpk（路径更新到 /mnt）
+      - name: Run Decompiler for pak01_dir.vpk
+        working-directory: /mnt/csfiles
         run: |
           if [ -f "./temp/pak01_dir.vpk" ]; then
-            rm -fr ./exceptions.txt
+            rm -f ./exceptions.txt
             chmod +x ./Source2Viewer-CLI
-            ./Source2Viewer-CLI -i "./temp/pak01_dir.vpk" -o "./static" -e "vtex_c" -d -f "panorama/images/econ"
+            ./Source2Viewer-CLI \
+              -i "./temp/pak01_dir.vpk" \
+              -o "./static" \
+              -e "vtex_c" \
+              -d \
+              -f "panorama/images/econ"
           else
-            echo "pak01_dir.vpk not found, skipping decompilation"
+            echo "pak01_dir.vpk not found, skipping"
           fi
+
+      # ✨ 生成 default_generated.json
       - name: Generate default_generated.json
+        working-directory: /mnt/csfiles
         run: node list.js
+
+      # ✨ 读取 manifestId（路径更新）
       - name: Read manifestId.txt
         id: manifestId
         uses: juliangruber/read-file-action@v1
         with:
-          path: ./static/manifestId.txt
+          path: /mnt/csfiles/static/manifestId.txt
+
+      # ✨ 将结果拷回仓库并提交
+      - name: Copy results back to repo
+        run: cp -r /mnt/csfiles/static ./static || true
+
       - name: Commit & push changes
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
