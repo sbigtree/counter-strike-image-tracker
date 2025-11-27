@@ -2,8 +2,8 @@ name: Download CS Game Files
 
 on:
   schedule:
-    - cron: "30 0 * * *" # UTC 00:30 -> 北京 08:30
-    - cron: "0 8 * * *"  # UTC 08:00 -> 北京 16:00
+    - cron: "30 0 * * *"
+    - cron: "0 8 * * *"
   workflow_dispatch:
     inputs:
       environment:
@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ✨ 释放 GitHub Runner 大量空间（15~20GB）
+      # 释放 15～20GB 磁盘空间
       - name: Free disk space
         run: |
           echo "Before cleanup:"
@@ -38,27 +38,28 @@ jobs:
           echo "After cleanup:"
           df -h
 
-      # ✨ 使用 /mnt 作为大容量存储（70GB+）
+      # 使用 GitHub Runner 自带的大空间目录
       - name: Prepare storage dir
         run: |
-          mkdir -p /mnt/csfiles
-          echo "Using /mnt/csfiles for downloads"
-          df -h /mnt
+          export BIGDIR="/home/runner/work/_temp/csfiles"
+          mkdir -p "$BIGDIR"
+          echo "BIGDIR=$BIGDIR" >> $GITHUB_ENV
+          echo "Storage Path: $BIGDIR"
+          df -h
 
       - uses: actions/setup-node@v3
 
-      # ✨ 进入 /mnt/csfiles 执行你的下载逻辑
+      # 复制仓库文件到大目录执行
       - name: Download new game files
-        working-directory: /mnt/csfiles
         run: |
-          cp -r $GITHUB_WORKSPACE/* /mnt/csfiles/
+          cp -r . "$BIGDIR"
+          cd "$BIGDIR"
           npm install
           node index.js "${{ secrets.USERNAME }}" "${{ secrets.PASSWORD }}" "${{ secrets.SHARED_SECRET }}" "${{ github.event.inputs.environment }}"
 
-      # ✨ 反编译 pak01_dir.vpk（路径更新到 /mnt）
       - name: Run Decompiler for pak01_dir.vpk
-        working-directory: /mnt/csfiles
         run: |
+          cd "$BIGDIR"
           if [ -f "./temp/pak01_dir.vpk" ]; then
             rm -f ./exceptions.txt
             chmod +x ./Source2Viewer-CLI
@@ -72,21 +73,22 @@ jobs:
             echo "pak01_dir.vpk not found, skipping"
           fi
 
-      # ✨ 生成 default_generated.json
       - name: Generate default_generated.json
-        working-directory: /mnt/csfiles
-        run: node list.js
+        run: |
+          cd "$BIGDIR"
+          node list.js
 
-      # ✨ 读取 manifestId（路径更新）
       - name: Read manifestId.txt
         id: manifestId
         uses: juliangruber/read-file-action@v1
         with:
-          path: /mnt/csfiles/static/manifestId.txt
+          path: ${{ env.BIGDIR }}/static/manifestId.txt
 
-      # ✨ 将结果拷回仓库并提交
+      # 拷回仓库
       - name: Copy results back to repo
-        run: cp -r /mnt/csfiles/static ./static || true
+        run: |
+          rm -rf ./static
+          cp -r "$BIGDIR/static" ./static
 
       - name: Commit & push changes
         uses: stefanzweifel/git-auto-commit-action@v4
