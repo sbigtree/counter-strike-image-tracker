@@ -1,0 +1,38 @@
+name: Resolve CDN URLs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve CDN URLs
+        run: node scripts/resolve-cdn-urls.js
+
+      - name: Commit & push changes
+        id: auto-commit
+        uses: stefanzweifel/git-auto-commit-action@v7
+        with:
+          commit_message: "Update static CDN URLs"
+
+      - name: Trigger CSGO-API update
+        if: steps.auto-commit.outputs.changes_detected == 'true'
+        run: |
+          gh api repos/ByMykel/CSGO-API/dispatches \
+            -f event_type=game-images-updated
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}

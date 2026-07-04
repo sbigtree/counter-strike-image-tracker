@@ -2,8 +2,8 @@ name: Download CS Game Files
 
 on:
   schedule:
-    - cron: "30 0 * * *"
-    - cron: "0 8 * * *"
+  - cron: "0 */12 * * *"
+
   workflow_dispatch:
     inputs:
       environment:
@@ -11,86 +11,26 @@ on:
         required: false
         default: "force"
         type: choice
-        options: [force]
-
+        options: [ force ]
 jobs:
-  download:
-    runs-on: ubuntu-latest
+    download:
+      runs-on: ubuntu-latest
 
-    permissions:
-      contents: write
+      permissions:
+        # Give the default GITHUB_TOKEN write permission to commit and push the changed files back to the repository.
+        contents: write
 
-    steps:
-      - uses: actions/checkout@v4
-
-      # 释放 15～20GB 磁盘空间
-      - name: Free disk space
-        run: |
-          echo "Before cleanup:"
-          df -h
-
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/hostedtoolcache
-          sudo rm -rf /opt/google
-          sudo rm -rf $AGENT_TOOLSDIRECTORY
-
-          echo "After cleanup:"
-          df -h
-
-      # 使用 GitHub Runner 自带的大空间目录
-      - name: Prepare storage dir
-        run: |
-          export BIGDIR="/home/runner/work/_temp/csfiles"
-          mkdir -p "$BIGDIR"
-          echo "BIGDIR=$BIGDIR" >> $GITHUB_ENV
-          echo "Storage Path: $BIGDIR"
-          df -h
-
-      - uses: actions/setup-node@v3
-
-      # 复制仓库文件到大目录执行
-      - name: Download new game files
-        run: |
-          cp -r . "$BIGDIR"
-          cd "$BIGDIR"
-          npm install
-          node index.js "${{ secrets.USERNAME }}" "${{ secrets.PASSWORD }}" "${{ secrets.SHARED_SECRET }}" "${{ github.event.inputs.environment }}"
-
-      - name: Run Decompiler for pak01_dir.vpk
-        run: |
-          cd "$BIGDIR"
-          if [ -f "./temp/pak01_dir.vpk" ]; then
-            rm -f ./exceptions.txt
-            chmod +x ./Source2Viewer-CLI
-            ./Source2Viewer-CLI \
-              -i "./temp/pak01_dir.vpk" \
-              -o "./static" \
-              -e "vtex_c" \
-              -d \
-              -f "panorama/images/econ"
-          else
-            echo "pak01_dir.vpk not found, skipping"
-          fi
-
-      - name: Generate default_generated.json
-        run: |
-          cd "$BIGDIR"
-          node list.js
-
-      - name: Read manifestId.txt
-        id: manifestId
-        uses: juliangruber/read-file-action@v1
-        with:
-          path: ${{ env.BIGDIR }}/static/manifestId.txt
-
-      # 拷回仓库
-      - name: Copy results back to repo
-        run: |
-          rm -rf ./static
-          cp -r "$BIGDIR/static" ./static
-
-      - name: Commit & push changes
-        uses: stefanzweifel/git-auto-commit-action@v4
-        with:
-          commit_message: "manifest ${{ steps.manifestId.outputs.content }}"
+      steps:
+        - uses: actions/checkout@master
+        - uses: actions/setup-node@v3
+        - name: Download new game files
+          run: npm install && node index.js '${{ secrets.USERNAME }}' '${{ secrets.PASSWORD }}'
+        - name: Read manifestId.txt
+          id: manifestId
+          uses: juliangruber/read-file-action@v1
+          with:
+            path: ./static/manifestId.txt
+        - name: Commit & push changes
+          uses: stefanzweifel/git-auto-commit-action@v4
+          with:
+            commit_message: "manifest ${{ steps.manifestId.outputs.content }}"

@@ -4,34 +4,17 @@
  */
 const SteamUser = require("steam-user");
 const SteamTotp = require('steam-totp')
-
 const fs = require("fs");
 const vpk = require("vpk");
 const util = require("util");
-
+const { exec } = require("child_process");
 const appId = 730;
 const depotId = 2347770;
 const dir = `./static`;
 const temp = "./temp";
 const manifestIdFile = "manifestId.txt";
 
-const vpkFolders = [
-    "panorama/images/econ/characters",
-    "panorama/images/econ/default_generated",
-    "panorama/images/econ/music_kits",
-    "panorama/images/econ/patches",
-    "panorama/images/econ/season_icons",
-    "panorama/images/econ/set_icons",
-    "panorama/images/econ/status_icons",
-    "panorama/images/econ/stickers",
-    "panorama/images/econ/tools",
-    "panorama/images/econ/weapons",
-    "panorama/images/econ/weapon_cases",
-    "panorama/images/econ/tournaments",
-    "panorama/images/econ/premier_seasons",
-];
-
-const delay = util.promisify(setTimeout);
+const vpkFolders = ["panorama/images/econ"];
 
 async function downloadVPKDir(user, manifest) {
     const dirFile = manifest.manifest.files.find((file) =>
@@ -40,14 +23,9 @@ async function downloadVPKDir(user, manifest) {
 
     console.log(`Downloading vpk dir`);
 
-    try {
-        await user.downloadFile(appId, depotId, dirFile, `${temp}/pak01_dir.vpk`);
-    } catch (error) {
-        console.error(`❌ Failed to download pak01_dir.vpk: ${error.message}`);
-        return null; // Return null to handle failure gracefully
-    }
+    await user.downloadFile(appId, depotId, dirFile, `${temp}/pak01_dir.vpk`);
 
-    const vpkDir = new vpk(`${temp}/pak01_dir.vpk`);
+    vpkDir = new vpk(`${temp}/pak01_dir.vpk`);
     vpkDir.load();
 
     return vpkDir;
@@ -58,8 +36,11 @@ function getRequiredVPKFiles(vpkDir) {
 
     for (const fileName of vpkDir.files) {
         for (const f of vpkFolders) {
-            if (fileName.startsWith(f)) {
-                // console.log(`Found vpk for ${f}: ${fileName}`);
+            if (
+                fileName.startsWith(f) &&
+                (fileName.includes(".vtex_c") || fileName.includes(".txt"))
+            ) {
+                console.log(`Found vpk for ${f}: ${fileName}`);
 
                 const archiveIndex = vpkDir.tree[fileName].archiveIndex;
 
@@ -72,23 +53,21 @@ function getRequiredVPKFiles(vpkDir) {
         }
     }
 
-    return requiredIndices.sort((a, b) => a - b);
+    return requiredIndices.sort();
 }
 
 async function downloadVPKArchives(user, manifest, vpkDir) {
-    if (!vpkDir) {
-        console.error("⚠️ Skipping VPK archive downloads due to previous failure.");
-        return;
-    }
-
     const requiredIndices = getRequiredVPKFiles(vpkDir);
-    // console.log(`Required VPK files: ${requiredIndices}`);
 
-    for (let index = 0; index < requiredIndices.length; index++) {
+    console.log(`Required VPK files ${requiredIndices}`);
+
+    for (let index in requiredIndices) {
+        index = parseInt(index);
+
+        // pad to 3 zeroes
         const archiveIndex = requiredIndices[index];
-
-        // Pad index with zeroes (e.g., 001, 002)
-        const paddedIndex = archiveIndex.toString().padStart(3, "0");
+        const paddedIndex =
+            "0".repeat(3 - archiveIndex.toString().length) + archiveIndex;
         const fileName = `pak01_${paddedIndex}.vpk`;
 
         const file = manifest.manifest.files.find((f) =>
@@ -100,19 +79,29 @@ async function downloadVPKArchives(user, manifest, vpkDir) {
 
         console.log(`${status} Downloading ${fileName}`);
 
-        try {
-            await user.downloadFile(appId, depotId, file, filePath);
-            console.log(`✅ Successfully downloaded ${fileName}`);
-        } catch (error) {
-            console.error(`❌ Failed to download ${fileName}: ${error.message}`);
-        }
-
-        // Add a delay of 3 seconds between downloads to avoid rate limiting
-        await delay(3000);
+        await user.downloadFile(appId, depotId, file, filePath);
     }
 }
 
-if (process.argv.length < 4) {
+/**
+ * https://ali-dev.medium.com/how-to-use-promise-with-exec-in-node-js-a39c4d7bbf77
+ *
+ * Executes a shell command and return it as a Promise.
+ * @param cmd {string}
+ * @return {Promise<string>}
+ */
+function execShellCommand(cmd) {
+    return new Promise((resolve, reject) => {
+        exec(cmd, (error, stdout, stderr) => {
+            if (error) {
+                console.warn(error);
+            }
+            resolve(stdout ? stdout : stderr);
+        });
+    });
+}
+
+if (process.argv.length != 4) {
     console.error(
         `Missing input arguments, expected 4 got ${process.argv.length}`
     );
@@ -130,77 +119,72 @@ if (!fs.existsSync(temp)) {
 const user = new SteamUser();
 
 console.log("Logging into Steam....");
+
 let twoFactorCode = null
 let forceUpdate = false
 if (process.argv[4]) {
-    twoFactorCode = SteamTotp.getAuthCode(process.argv[4])
+  twoFactorCode = SteamTotp.getAuthCode(process.argv[4])
 }
 if (process.argv[5]) {
-    forceUpdate = process.argv[5]=='force'
-    console.log(`📦 forceUpdate ${forceUpdate}`);
+  forceUpdate = process.argv[5]=='force'
+  console.log(`📦 forceUpdate ${forceUpdate}`);
 
 }
 
 user.logOn({
     accountName: process.argv[2],
     password: process.argv[3],
-    twoFactorCode: twoFactorCode,
     rememberPassword: true,
+    twoFactorCode: twoFactorCode,
     logonID: 2121,
 });
 
 user.once("loggedOn", async () => {
-    console.log("✅ Logged into Steam");
+    const cs = (await user.getProductInfo([appId], [], true)).apps[appId]
+        .appinfo;
+    const commonDepot = cs.depots[depotId];
+    const latestManifestId = commonDepot.manifests.public.gid;
 
-    let latestManifestId;
-    try {
-        const cs = (await user.getProductInfo([appId], [], true)).apps[appId]
-            .appinfo;
-        const commonDepot = cs.depots[depotId];
-        latestManifestId = commonDepot.manifests.public.gid;
-
-        console.log(`📦 Obtained latest manifest ID: ${latestManifestId}`);
-    } catch (error) {
-        console.error(`❌ Failed to retrieve manifest ID: ${error.message}`);
-        process.exit(1);
-    }
+    console.log(`Obtained latest manifest ID: ${latestManifestId}`);
 
     let existingManifestId = "";
 
     try {
         existingManifestId = fs.readFileSync(`${dir}/${manifestIdFile}`);
     } catch (err) {
-        if (err.code !== "ENOENT") {
-            console.error(`❌ Error reading manifest ID file: ${err.message}`);
+        if (err.code != "ENOENT") {
             throw err;
         }
     }
 
-    if (!forceUpdate&&existingManifestId == latestManifestId) {
-        console.log("⚠️ Latest manifest ID matches existing manifest ID, exiting.");
+    if (existingManifestId == latestManifestId) {
+        console.log("Latest manifest Id matches existing manifest Id, exiting");
         process.exit(0);
     }
 
-    console.log("🔄 Manifest ID changed, downloading new files...");
+    console.log(
+        "Latest manifest Id does not match existing manifest Id, downloading game files"
+    );
 
-    let manifest;
-    try {
-        manifest = await user.getManifest(appId, depotId, latestManifestId, "public");
-    } catch (error) {
-        console.error(`❌ Failed to get manifest: ${error.message}`);
-        process.exit(1);
-    }
+    const manifest = await user.getManifest(
+        appId,
+        depotId,
+        latestManifestId,
+        "public"
+    );
 
     const vpkDir = await downloadVPKDir(user, manifest);
     await downloadVPKArchives(user, manifest, vpkDir);
 
+    await execShellCommand(
+        './Decompiler -i "./temp/pak01_dir.vpk" -o "./static" -e "vtex_c" -d -f "panorama/images/econ"'
+    );
+
     try {
         fs.writeFileSync(`${dir}/${manifestIdFile}`, latestManifestId);
-        console.log("✅ Updated manifest ID file.");
-    } catch (error) {
-        console.error(`❌ Failed to write manifest ID file: ${error.message}`);
+    } catch (err) {
+        throw err;
     }
 
-    console.log("🎉 Done!");
     process.exit(0);
 });

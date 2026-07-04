@@ -1,0 +1,162 @@
+# Scripts
+
+Scripts for tracking and collecting Counter-Strike 2 item images. They populate `static/images.json`, which maps `image_inventory` paths to image URLs.
+
+## Image URL types
+
+There are three kinds of image URLs in `images.json`:
+
+- **Raw GitHub** (`raw.githubusercontent.com/...`) — points to the local file in this repo. Assigned automatically when a new image is extracted from game files.
+- **Static CDN** (`cdn.steamstatic.com/apps/730/icons/...`) — built from local game files by computing their SHA1 hash. Easiest to obtain since they can be generated locally.
+- **Economy CDN** (`community.akamai.steamstatic.com/economy/image/...`) — scraped from Steam Market pages. Required for items that aren't available on the static CDN.
+
+Raw GitHub URLs are upgraded to CDN URLs when possible by the resolve and scrape scripts.
+
+## Pipeline overview
+
+Hourly (`download-and-extract-game-images.yml`):
+
+1. **download-game-files.js** — downloads VPK archives from Steam
+2. Decompile textures with Source2Viewer (done in the workflow, not a script)
+3. **list-default-generated.js** — records the `default_generated` file list
+4. **register-new-images.js** — adds new images to `images.json` with raw GitHub URLs
+
+Weekly (`scrape-individual-listings.yml`):
+
+5. **scrape-individual-listings.js** — upgrades raw GitHub URLs to economy CDN URLs
+
+Manual (`resolve-cdn-urls.yml`):
+
+6. **resolve-cdn-urls.js** — upgrades raw GitHub URLs to static CDN URLs
+
+Manual (run locally, ~2x per year):
+
+7. **extract-highlight-thumbnails.js** — extracts thumbnail frames from Souvenir Highlight videos
+
+**Note:** `utils.js` contains shared helpers used by the scripts above.
+
+---
+
+## download-game-files.js
+
+Downloads Counter-Strike 2 VPK game files from Steam using [steam-user](https://github.com/DoctorMcKay/node-steam-user). Only downloads archives that have changed since the last run (tracked via `static/fileSha.json`).
+
+```bash
+node scripts/download-game-files.js <username> <password> [--recheck|--force]
+```
+
+**Arguments:**
+- `<username>` — Steam account username
+- `<password>` — Steam account password
+
+**Flags:**
+- `--recheck` — skip the manifest ID cache and re-check for changed archives (only downloads archives with different SHAs)
+- `--force` — re-download all archives regardless of manifest ID or SHA differences
+
+**Key features:**
+- Compares the latest depot manifest ID against `static/manifestId.txt` to skip unnecessary downloads
+- Downloads `pak01_dir.vpk` and only the changed `pak01_XXX.vpk` archives
+- Retries failed downloads with exponential backoff (up to 3 attempts)
+- Outputs files to `temp/` for subsequent decompilation
+
+**Output files:** `temp/pak01_*.vpk`, `static/manifestId.txt`, `static/fileSha.json`
+
+---
+
+## list-default-generated.js
+
+Records filenames from `static/panorama/images/econ/default_generated/` into `static/default_generated.json`. Merges with existing entries and deduplicates.
+
+```bash
+node scripts/list-default-generated.js
+```
+
+No flags. Runs without arguments.
+
+**Output file:** `static/default_generated.json`
+
+---
+
+## register-new-images.js
+
+Scans `static/panorama/images/econ/` for PNG and SVG files not yet in `images.json` and adds them with their raw GitHub URL. Runs automatically as part of the hourly workflow.
+
+```bash
+node scripts/register-new-images.js
+```
+
+No flags. Runs without arguments.
+
+**Key features:**
+- Supports both `_png.png` and `.svg` files
+- Adds entries for new files and fills in URLs for existing entries with `null` values
+- Assigns raw GitHub URLs so images are immediately accessible
+
+**Output file:** `static/images.json`
+
+---
+
+## resolve-cdn-urls.js
+
+For each unresolved entry (raw GitHub URL) in `static/images.json`, checks if the image is available on the static CDN by computing the local file's SHA1 hash, constructing the URL, and verifying it exists with a HEAD request.
+
+```bash
+node scripts/resolve-cdn-urls.js
+```
+
+No flags. Runs without arguments.
+
+**Key features:**
+- Processes 5 concurrent requests at a time
+- Processes entries with raw GitHub URLs or `null` values
+
+**Output file:** `static/images.json` (upgrades to static CDN URLs)
+
+---
+
+## scrape-individual-listings.js
+
+Fetches economy CDN URLs by visiting individual Steam Market listing pages. Requires Steam login.
+
+```bash
+node scripts/scrape-individual-listings.js <username> <password> [--all] [--type <type>] [--query <query>]
+```
+
+**Arguments:**
+- `<username>` — Steam account username
+- `<password>` — Steam account password
+
+**Flags:**
+- `--all` — re-fetch all items, not just missing ones. Static CDN URLs are preserved.
+- `--type <type>` — filter by item type using [CSGO-API](https://github.com/ByMykel/CSGO-API) endpoints: `skins`, `stickers`, `sticker_slabs`, `keychains`, `keys`, `collectibles`, `agents`, `patches`, `graffiti`, `music_kits`, `crates`
+- `--query <query>` — filter items by name (e.g. `--query "AK-47"`)
+
+**Key features:**
+- By default, only processes items without a CDN URL (raw GitHub URLs or `null`)
+- With `--all`, re-fetches economy CDN URLs while preserving static CDN URLs
+- 10-second delay between requests to respect rate limits
+- Max runtime of 5.5 hours (fits GitHub Actions limits)
+- Graceful shutdown on SIGINT/SIGTERM
+- Phase/doppler items are skipped
+
+**Output file:** `static/images.json`
+
+---
+
+## extract-highlight-thumbnails.js
+
+Extracts a single thumbnail frame from each Souvenir Highlight video listed in the [CSGO-API highlights endpoint](https://github.com/ByMykel/CSGO-API). Saves frames as WebP images.
+
+```bash
+node scripts/extract-highlight-thumbnails.js
+```
+
+No flags. Runs without arguments.
+
+**Key features:**
+- Processes both English (`ww/`) and Chinese (`cn/`) Souvenir Highlights
+- Extracts a frame at ~2–3 seconds (varies by tournament event)
+- Skips thumbnails that already exist
+- Requires `ffmpeg-static`
+
+**Output directory:** `static/highlightreels/{ww,cn}/<def_index>.webp`
