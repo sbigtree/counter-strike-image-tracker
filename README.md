@@ -23,3 +23,16 @@ The JSON structure contains the `image_inventory` as the key and the official CD
 ```
 
 docker compose up --build
+
+## Fork 仓库 Actions 配置
+
+本仓库的部分 workflow 会在图片数据更新后通过 `repository_dispatch` 通知 CSGO-API 仓库刷新数据。Fork 仓库默认没有上游仓库权限，因此未配置 `PAT_TOKEN` 时 workflow 会跳过该通知步骤，避免因为 GitHub CLI 缺少 `GH_TOKEN` 导致任务失败。
+
+如果需要在 fork 中继续触发 CSGO-API 更新，请在 GitHub 仓库设置中添加：
+
+| 配置名称              | 配置类型   | 当前说明                                                                               |
+| --------------------- | ---------- | -------------------------------------------------------------------------------------- |
+| `PAT_TOKEN`           | Secret     | 用于调用目标仓库 `repository_dispatch` 的 GitHub Personal Access Token，需要目标仓库权限 |
+| `CSGO_API_REPOSITORY` | Variable   | 可选，目标仓库名称，格式为 `owner/repo`；未配置时默认使用 `ByMykel/CSGO-API`            |
+
+如果只是让 fork 自己下载和提交图片文件，不需要配置以上两项。

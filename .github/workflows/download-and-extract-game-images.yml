@@ -65,7 +65,13 @@ jobs:
 
       - name: Trigger CSGO-API update
         run: |
-          gh api repos/ByMykel/CSGO-API/dispatches \
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "PAT_TOKEN is not configured; skipping CSGO-API repository_dispatch for this fork."
+            exit 0
+          fi
+
+          gh api "repos/${CSGO_API_REPOSITORY}/dispatches" \
             -f event_type=game-images-updated
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          CSGO_API_REPOSITORY: ${{ vars.CSGO_API_REPOSITORY || 'ByMykel/CSGO-API' }}
