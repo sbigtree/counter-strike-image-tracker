@@ -32,6 +32,9 @@ docker compose up --build
 
 | 配置名称              | 配置类型   | 当前说明                                                                               |
 | --------------------- | ---------- | -------------------------------------------------------------------------------------- |
+| `USERNAME`            | Secret     | Steam 登录账号，用于下载 CS2 游戏文件                                                  |
+| `PASSWORD`            | Secret     | Steam 登录密码，用于下载 CS2 游戏文件                                                  |
+| `SHARED_SECRET`       | Secret     | Steam 两步验证 shared secret；为空时按普通登录流程处理                                 |
 | `PAT_TOKEN`           | Secret     | 用于调用目标仓库 `repository_dispatch` 的 GitHub Personal Access Token，需要目标仓库权限 |
 | `CSGO_API_REPOSITORY` | Variable   | 可选，目标仓库名称，格式为 `owner/repo`；未配置时默认使用 `ByMykel/CSGO-API`            |
 

@@ -38,6 +38,20 @@ const vpkFolders = [
 
 const delay = util.promisify(setTimeout);
 
+const accountName = process.argv[2];
+const password = process.argv[3];
+const optionalSharedSecretOrFlag = process.argv[4] || "";
+
+// 第 4 个业务参数如果是 --force/--recheck，说明使用的是旧命令格式；否则按 Steam shared_secret 处理。
+const sharedSecret = optionalSharedSecretOrFlag.startsWith("--") ? "" : optionalSharedSecretOrFlag;
+
+// shared_secret 之后才是真正的运行参数；这里兼容旧格式，避免本地老命令突然不可用。
+const flags = optionalSharedSecretOrFlag.startsWith("--")
+    ? process.argv.slice(4)
+    : process.argv.slice(5);
+const forceUpdate = flags.includes("--force");
+const recheckManifest = flags.includes("--recheck");
+
 async function downloadVPKDir(user, manifest) {
     const dirFile = manifest.manifest.files.find((file) =>
         file.filename.endsWith("csgo\\pak01_dir.vpk")
@@ -73,7 +87,7 @@ function getRequiredVPKFiles(vpkDir) {
 
                 const archiveIndex = vpkDir.tree[fileName].archiveIndex;
 
-                const fileShaIsDifferent = fileShaContentDiff[archiveIndex.toString().padStart(3, "0")] || process.argv[4] === '--force';
+                const fileShaIsDifferent = fileShaContentDiff[archiveIndex.toString().padStart(3, "0")] || forceUpdate;
 
                 if (!requiredIndices.includes(archiveIndex) && fileShaIsDifferent) {
                     requiredIndices.push(archiveIndex);
@@ -171,9 +185,9 @@ async function getChangedFiles(manifest) {
     }
 }
 
-if (process.argv.length != 4 && process.argv.length != 5) {
+if (!accountName || !password || process.argv.length > 6) {
     console.error(
-        `Missing input arguments, expected 4 or 5 got ${process.argv.length}`
+        "Usage: node scripts/download-game-files.js <username> <password> [shared_secret] [--recheck|--force]"
     );
     process.exit(1);
 }
@@ -190,13 +204,12 @@ const user = new SteamUser();
 
 console.log("Logging into Steam....");
 
-if (process.argv[4]) {
-    twoFactorCode = SteamTotp.getAuthCode(process.argv[4])
-}
+// GitHub Actions 会把 SHARED_SECRET 作为第 3 个业务参数传入；为空时沿用 Steam 的普通登录流程。
+const twoFactorCode = sharedSecret ? SteamTotp.getAuthCode(sharedSecret) : undefined;
 
 user.logOn({
-    accountName: process.argv[2],
-    password: process.argv[3],
+    accountName,
+    password,
     twoFactorCode: twoFactorCode,
     rememberPassword: true,
     logonID: 2121,
@@ -229,7 +242,7 @@ user.once("loggedOn", async () => {
         }
     }
 
-    if (existingManifestId == latestManifestId && process.argv[4] !== '--recheck' && process.argv[4] !== '--force') {
+    if (existingManifestId == latestManifestId && !recheckManifest && !forceUpdate) {
         console.log("⚠️ Latest manifest ID matches existing manifest ID, exiting.");
         process.exit(0);
     }

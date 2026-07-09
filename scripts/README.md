@@ -42,12 +42,13 @@ Manual (run locally, ~2x per year):
 Downloads Counter-Strike 2 VPK game files from Steam using [steam-user](https://github.com/DoctorMcKay/node-steam-user). Only downloads archives that have changed since the last run (tracked via `static/fileSha.json`).
 
 ```bash
-node scripts/download-game-files.js <username> <password> [--recheck|--force]
+node scripts/download-game-files.js <username> <password> [shared_secret] [--recheck|--force]
 ```
 
 **Arguments:**
 - `<username>` — Steam account username
 - `<password>` — Steam account password
+- `[shared_secret]` — optional Steam shared secret used to generate the two-factor login code in CI
 
 **Flags:**
 - `--recheck` — skip the manifest ID cache and re-check for changed archives (only downloads archives with different SHAs)
